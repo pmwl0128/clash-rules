@@ -1,0 +1,13 @@
+# 个人覆盖层：强制走代理
+# 用于 geosite 未收录、或被 geosite:cn 误判为国内的境外服务
+payload:
+  - '+.openrouter.ai'
+  - '+.groq.com'
+  - '+.together.ai'
+  - '+.modelscope.ai'
+  - '+.v0.dev'
+  - '+.vercel.com'
+  - '+.vercel.app'
+  - '+.supabase.co'
+  - '+.railway.app'
+  - '+.fly.io'

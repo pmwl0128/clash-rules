@@ -1,0 +1,9 @@
+# Antigravity CLI (agy) 专用域名
+# 需与其它环境使用不同出口节点，故独立成组，不并入通用 AI 分类
+payload:
+  - '+.antigravity.google'
+  - '+.antigravity-unleash.goog'
+  - '+.businessaicode.googleapis.com'
+  - '+.cloudcode-pa.googleapis.com'
+  - '+.aiplatform.googleapis.com'
+  - 'antigravity-cli-auto-updater-974169037036.us-central1.run.app'

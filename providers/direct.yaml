@@ -1,0 +1,8 @@
+# 个人覆盖层：强制直连
+# geosite:cn 已覆盖绝大多数国内域名，这里只放它漏掉或判断有误的
+payload:
+  - '+.npmmirror.com'
+  - '+.cnpmjs.org'
+  - '+.mirrors.ustc.edu.cn'
+  - '+.mirror.nju.edu.cn'
+  - '+.pypi.doubanio.com'
