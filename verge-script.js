@@ -4,6 +4,7 @@
 // 仓库：https://github.com/pmwl0128/clash-rules
 
 function main(config, profileName) {
+  delete config['global-client-fingerprint'];
   // ============ 配置区：改这里即可，下面的逻辑不用动 ============
   var GH = 'https://raw.githubusercontent.com/pmwl0128/clash-rules/main/providers/';
 
