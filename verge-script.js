@@ -13,10 +13,11 @@ function main(config, profileName) {
   var LEAK = '🐟 漏网之鱼';      // 总兜底
   var ADS  = '🛑 广告拦截';
   var AGY  = '🚀 Antigravity';
+  var ORC  = '☁️ Oracle';
 
   // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
   // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
-  var DIRECT_FIRST = ['📺 Bilibili'];
+  var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
 
   // 保留订阅原始规则的组（机场自建服务，规则内容只有机场自己知道）
   // 脚本只按组名提取，不硬编码任何机场域名，因此可安全公开
@@ -65,7 +66,8 @@ function main(config, profileName) {
     // 游戏与其它
     ['steam',            '🌏 Steam'],
     ['xbox',             '🌏 Xbox'],
-    ['category-pt',      '🌏 PrivateTracker']
+    ['category-pt',      '🌏 PrivateTracker'],
+    ['oracle',           '☁️ Oracle']
   ];
 
   // 需要建的策略组（顺序即面板显示顺序）
@@ -75,7 +77,7 @@ function main(config, profileName) {
     '📺 Netflix', '📺 Disney', '📺 YouTube', '📺 HBOMAX', '🐭 Twitch',
     '📺 Emby影院', '📺 Bilibili', '🌏 巴哈姆特',
     '📲 Telegram', '🌏 Twitter', '🌏 Discord', '🌏 Tiktok', '🌏 Dropbox',
-    '🍎 Apple', '🍎 Apple TV', 'Ⓜ️ 微软', '✈️ Bing',
+    '🍎 Apple', '🍎 Apple TV', 'Ⓜ️ 微软', '✈️ Bing', '☁️ Oracle',
     '🌏 Steam', '🌏 Xbox', '🌏 PrivateTracker', '🌏 GFWlist'
   ];
   // ============ 配置区结束 ============
@@ -108,9 +110,9 @@ function main(config, profileName) {
   });
 
   // ---- 3. rule-provider ----
-  function prov(name) {
+  function prov(name, behavior) {
     return {
-      type: 'http', behavior: 'domain', format: 'yaml',
+      type: 'http', behavior: behavior || 'domain', format: 'yaml',
       url: GH + name + '.yaml', path: './rules/' + name + '.yaml',
       interval: 86400, proxy: MAIN
     };
@@ -119,7 +121,9 @@ function main(config, profileName) {
     'my-antigravity': prov('antigravity'),
     'my-direct':      prov('direct'),
     'my-proxy':       prov('proxy'),
-    'my-reject':      prov('reject')
+    'my-reject':      prov('reject'),
+    'my-oracle':      prov('oracle'),
+    'my-oracle-ip':   prov('oracle-ip', 'ipcidr')
   };
 
   // ---- 4. 策略组 ----
@@ -188,6 +192,9 @@ function main(config, profileName) {
     rules.push('DOMAIN-SUFFIX,appletv.com,🍎 Apple TV');
   }
 
+  // 5.6b Oracle 云：geosite:oracle 漏掉的 OCI 专有域名，须在分类规则之前
+  if (built[ORC]) rules.push('RULE-SET,my-oracle,' + ORC);
+
   // 5.7 分类规则
   GEO_MAP.forEach(function (m) {
     if (built[m[1]]) rules.push('GEOSITE,' + m[0] + ',' + m[1]);
@@ -195,6 +202,10 @@ function main(config, profileName) {
 
   // 5.8 IP 段补充（域名规则漏掉的连接）
   if (built['📲 Telegram']) rules.push('GEOIP,telegram,📲 Telegram,no-resolve');
+  // OCI 公开 IP 段，覆盖 SSH / API 等直接用 IP 发起的连接。
+  // no-resolve 是关键：域名请求不在这里解析比对，仍按上面的域名规则走，
+  // 托管在 OCI 上的境外站点因此不会被误判直连。
+  if (built[ORC]) rules.push('RULE-SET,my-oracle-ip,' + ORC + ',no-resolve');
 
   // 5.9 兜底顺序：国内直连 -> 境外走主力 -> 其余进兜底组
   rules.push('GEOSITE,cn,DIRECT');

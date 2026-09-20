@@ -40,8 +40,10 @@
 - `proxy.yaml` — 强制走代理
 - `reject.yaml` — 屏蔽
 - `antigravity.yaml` — Antigravity CLI 专用出口
+- `oracle.yaml` — Oracle 云补充域名
+- `oracle-ip.yaml` — Oracle 云 IP 段（`ipcidr` 类型）
 
-这四个优先级高于所有 `GEOSITE` 分类，可用来覆盖 geosite 的判断。
+前四个优先级高于所有 `GEOSITE` 分类，可用来覆盖 geosite 的判断。
 
 格式：
 
@@ -69,12 +71,35 @@ payload:
 默认直连，同时保留全部节点，需要时在面板一键切回代理。
 
 ```js
-var DIRECT_FIRST = ['📺 Bilibili'];
+var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
 ```
 
 B 站属于这类：`geosite:bilibili` 把视频 CDN（`bilivideo.com`、`hdslb.com`、`acgvideo.com`
 等 53 条）一并算进去，走代理等于让整条视频流绕境外中转。实测 `upos-sz-mirrorcos.bilivideo.com`
 首字节直连 0.23s、走新加坡节点 2.13s，差 9 倍，表现就是频繁卡顿。
+
+### Oracle 云
+
+`☁️ Oracle` 组同样默认直连。OCI 在国内可以直连，自己的实例绕一趟境外中转只是白白加延迟。
+
+覆盖分三层，缺一层就会漏：
+
+| 规则 | 位置 | 作用 |
+|---|---|---|
+| `RULE-SET,my-oracle` | 所有 `GEOSITE` 分类之前 | `providers/oracle.yaml`，补 geosite 漏掉的 OCI 域名 |
+| `GEOSITE,oracle` | 分类段末尾 | geosite 自带的 19 条，含 `oracle.com`、`oraclecloud.com` |
+| `RULE-SET,my-oracle-ip` | `GEOSITE,cn` 之前 | `providers/oracle-ip.yaml`，OCI 公开 IP 段 |
+
+放在分类段**末尾**是有意的：`geosite:oracle` 里混了 `java.com`、`virtualbox.org`，
+排在 `category-dev` 之后它们才会归「开发资源」，不被 Oracle 组吃掉。
+分类里的 `addthis.com` 等追踪域名则更早被广告拦截挡下。
+
+IP 段那条带 **`no-resolve`**，这是关键：域名请求不在这里解析比对，仍按上面的域名规则走。
+否则托管在 OCI 上的境外站点会被这 1107 条 CIDR 误判成直连。它只负责兜住 SSH、API
+这类直接用 IP 发起、匹配不到域名的连接。
+
+`oracle-ip.yaml` 由官方 [public_ip_ranges.json](https://docs.oracle.com/iaas/tools/public_ip_ranges.json)
+生成，是静态快照，不会自动跟上游走。Oracle 加了新区域再重新抓一次即可。
 
 ### 换机场
 
@@ -88,6 +113,8 @@ providers/
   direct.yaml        强制直连
   proxy.yaml         强制代理
   reject.yaml        黑名单
+  oracle.yaml        Oracle 云补充域名
+  oracle-ip.yaml     Oracle 云公开 IP 段（官方 JSON 生成）
 verge-script.js      Verge Script 扩展，策略组与规则在这里生成
 ```
 
@@ -100,10 +127,12 @@ verge-script.js      Verge Script 扩展，策略组与规则在这里生成
 3. 机场自建服务（订阅保留）
 4. 个人覆盖层（`reject` / `direct` / `proxy`）
 5. 广告拦截
-6. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
-7. 开发资源（npm / pypi / crates / GitHub）
-8. 其余 AI 服务
-9. 流媒体、社交、厂商、游戏
-10. `geosite:cn` + `GEOIP:CN` → 直连
-11. `geosite:geolocation-!cn` → 主力节点
-12. 兜底组
+6. Apple TV、Oracle 云补充域名
+7. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
+8. 开发资源（npm / pypi / crates / GitHub）
+9. 其余 AI 服务
+10. 流媒体、社交、厂商、游戏、`geosite:oracle`
+11. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
+12. `geosite:cn` + `GEOIP:CN` → 直连
+13. `geosite:geolocation-!cn` → 主力节点
+14. 兜底组

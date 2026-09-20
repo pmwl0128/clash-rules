@@ -1,0 +1,10 @@
+# Oracle / Oracle Cloud Infrastructure 补充域名
+# geosite:oracle 已收录 oracle.com、oraclecloud.com、oracleimg.com、
+# java.com、virtualbox.org 等，这里只补它漏掉的部分。
+# 已核实归属（NS 指向 Oracle 官方）：oraclecloud.cn 为第三方抢注，故不收录。
+payload:
+  - '+.oraclecloud.net'        # OCI 权威 DNS 与内部服务域
+  - '+.oraclecloudapps.com'    # OCI 应用/控制台域
+  - '+.oracleoutsourcing.com'  # Oracle 托管服务
+  - '+.oraclecorp.com'         # Oracle 企业域
+  - '+.mysql.com'              # MySQL，Oracle 旗下
