@@ -58,8 +58,23 @@ payload:
 - `GROUPS` — 策略组清单，顺序即面板显示顺序
 - `GEO_MAP` — geosite 分类到策略组的映射，**顺序即匹配优先级**
 - `KEEP_GROUPS` — 需要保留订阅原始规则的组
+- `DIRECT_FIRST` — 默认直连的组，见下
 - `TIERS` — 自动兜底组的节点优先级
 - `MAIN` — 主力组名称
+
+### 让某个组默认直连
+
+策略组默认选中成员列表的第一项。一般组的顺序是 `主力节点 / 兜底 / DIRECT / 各节点`，
+所以默认走代理。把组名加进 `DIRECT_FIRST`，该组会改成 `DIRECT / 主力节点 / 兜底 / 各节点`，
+默认直连，同时保留全部节点，需要时在面板一键切回代理。
+
+```js
+var DIRECT_FIRST = ['📺 Bilibili'];
+```
+
+B 站属于这类：`geosite:bilibili` 把视频 CDN（`bilivideo.com`、`hdslb.com`、`acgvideo.com`
+等 53 条）一并算进去，走代理等于让整条视频流绕境外中转。实测 `upos-sz-mirrorcos.bilivideo.com`
+首字节直连 0.23s、走新加坡节点 2.13s，差 9 倍，表现就是频繁卡顿。
 
 ### 换机场
 

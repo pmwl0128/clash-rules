@@ -14,6 +14,10 @@ function main(config, profileName) {
   var ADS  = '🛑 广告拦截';
   var AGY  = '🚀 Antigravity';
 
+  // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
+  // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
+  var DIRECT_FIRST = ['📺 Bilibili'];
+
   // 保留订阅原始规则的组（机场自建服务，规则内容只有机场自己知道）
   // 脚本只按组名提取，不硬编码任何机场域名，因此可安全公开
   var KEEP_GROUPS = ['📺 Emby影院'];
@@ -138,6 +142,8 @@ function main(config, profileName) {
         if (n.indexOf('🇺🇸') === 0 && n.indexOf(LINE) >= 0) us.push(n); else rest.push(n);
       });
       list = us.concat([MAIN]).concat(rest);
+    } else if (DIRECT_FIRST.indexOf(g) >= 0) {
+      list = ['DIRECT', MAIN].concat(pool.length ? [AUTO] : []).concat(names);
     } else {
       list = head.concat(names);
     }
