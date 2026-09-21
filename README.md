@@ -61,6 +61,7 @@ payload:
 - `GEO_MAP` — geosite 分类到策略组的映射，**顺序即匹配优先级**
 - `KEEP_GROUPS` — 需要保留订阅原始规则的组
 - `DIRECT_FIRST` — 默认直连的组，见下
+- `CN_DIRECT_GEOSITES` — 专用分类中应当优先直连的中国大陆子集
 - `TIERS` — 自动兜底组的节点优先级
 - `MAIN` — 主力组名称
 
@@ -77,6 +78,22 @@ var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
 B 站属于这类：`geosite:bilibili` 把视频 CDN（`bilivideo.com`、`hdslb.com`、`acgvideo.com`
 等 53 条）一并算进去，走代理等于让整条视频流绕境外中转。实测 `upos-sz-mirrorcos.bilivideo.com`
 首字节直连 0.23s、走新加坡节点 2.13s，差 9 倍，表现就是频繁卡顿。
+
+### 中国大陆子集与字节跳动
+
+Apple、Microsoft、Steam 等完整分类同时包含境内、境外服务，不能简单把整个策略组默认改成
+直连。脚本会先匹配上游明确维护的大陆子集（如 `apple-cn`、`microsoft@cn`、
+`steam@cn`），让中国区 CDN、系统更新等直连，再把其余域名交给对应策略组。
+
+字节跳动使用同样的分层思路，但需要覆盖抖音与头条共用的 `snssdk.com` 等域名：
+
+1. `category-ads-all` 先拦截带 `@ads` 标记的域名
+2. `tiktok` 与 `bytedance@!cn` 走「Tiktok」组
+3. 剩余 `bytedance`（抖音、头条及共用基础设施）直连
+
+顺序不能颠倒，否则要么抖音共用域名落入代理兜底，要么 TikTok 被误判为直连。
+另外，`bing` 和 `xbox` 必须放在 `microsoft` 之前；后者包含前两者，反过来排列会让
+「Bing」「Xbox」两个独立组永远无法命中。
 
 ### Oracle 云
 
@@ -128,11 +145,13 @@ verge-script.js      Verge Script 扩展，策略组与规则在这里生成
 4. 个人覆盖层（`reject` / `direct` / `proxy`）
 5. 广告拦截
 6. Apple TV、Oracle 云补充域名
-7. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
-8. 开发资源（npm / pypi / crates / GitHub）
-9. 其余 AI 服务
-10. 流媒体、社交、厂商、游戏、`geosite:oracle`
-11. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
-12. `geosite:cn` + `GEOIP:CN` → 直连
-13. `geosite:geolocation-!cn` → 主力节点
-14. 兜底组
+7. Apple / Microsoft / Steam 等中国大陆子集 → 直连
+8. TikTok / 字节境外子集 → Tiktok 组；其余字节域名 → 直连
+9. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
+10. 开发资源（npm / pypi / crates / GitHub）
+11. 其余 AI 服务
+12. 流媒体、社交、厂商、游戏、`geosite:oracle`
+13. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
+14. `geosite:cn` + `GEOIP:CN` → 直连
+15. `geosite:geolocation-!cn` → 主力节点
+16. 兜底组

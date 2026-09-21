@@ -14,10 +14,18 @@ function main(config, profileName) {
   var ADS  = '🛑 广告拦截';
   var AGY  = '🚀 Antigravity';
   var ORC  = '☁️ Oracle';
+  var TKT  = '🌏 Tiktok';
 
   // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
   // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
   var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
+
+  // 专用分类里明确标记为中国大陆可直连的子集。必须放在完整分类之前，
+  // 避免 Apple / Microsoft / Steam 等国内 CDN 被专用组先截获后绕境外。
+  var CN_DIRECT_GEOSITES = [
+    'category-dev@cn', 'apple-cn', 'microsoft@cn', 'bing@cn',
+    'steam@cn', 'xbox@cn', 'disney@cn', 'youtube@cn'
+  ];
 
   // 保留订阅原始规则的组（机场自建服务，规则内容只有机场自己知道）
   // 脚本只按组名提取，不硬编码任何机场域名，因此可安全公开
@@ -57,15 +65,15 @@ function main(config, profileName) {
     ['telegram',         '📲 Telegram'],
     ['twitter',          '🌏 Twitter'],
     ['discord',          '🌏 Discord'],
-    ['tiktok',           '🌏 Tiktok'],
     // 厂商
     ['apple',            '🍎 Apple'],
-    ['microsoft',        'Ⓜ️ 微软'],
+    // bing / xbox 都被 microsoft 包含，必须放在 microsoft 前面，否则独立组永远不会命中
     ['bing',             '✈️ Bing'],
+    ['xbox',             '🌏 Xbox'],
+    ['microsoft',        'Ⓜ️ 微软'],
     ['dropbox',          '🌏 Dropbox'],
     // 游戏与其它
     ['steam',            '🌏 Steam'],
-    ['xbox',             '🌏 Xbox'],
     ['category-pt',      '🌏 PrivateTracker'],
     ['oracle',           '☁️ Oracle']
   ];
@@ -194,6 +202,20 @@ function main(config, profileName) {
 
   // 5.6b Oracle 云：geosite:oracle 漏掉的 OCI 专有域名，须在分类规则之前
   if (built[ORC]) rules.push('RULE-SET,my-oracle,' + ORC);
+
+  // 5.6c 专用分类中的中国大陆子集：先直连，再由完整分类处理其余域名。
+  CN_DIRECT_GEOSITES.forEach(function (site) {
+    rules.push('GEOSITE,' + site + ',DIRECT');
+  });
+
+  // 5.6d 字节跳动：境外子集走 TikTok，其余（抖音、头条及共用域名）直连。
+  // 广告规则已在前面，因此 snssdk.com 等共用域既不会漏到 MATCH，
+  // 也不会因为直连整个字节分类而放过带 @ads 标记的子域名。
+  if (built[TKT]) {
+    rules.push('GEOSITE,tiktok,' + TKT);
+    rules.push('GEOSITE,bytedance@!cn,' + TKT);
+    rules.push('GEOSITE,bytedance,DIRECT');
+  }
 
   // 5.7 分类规则
   GEO_MAP.forEach(function (m) {
