@@ -18,13 +18,20 @@ function main(config, profileName) {
 
   // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
   // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
-  var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
+  var DIRECT_FIRST = ['📺 Bilibili'];
 
   // 专用分类里明确标记为中国大陆可直连的子集。必须放在完整分类之前，
   // 避免 Apple / Microsoft / Steam 等国内 CDN 被专用组先截获后绕境外。
   var CN_DIRECT_GEOSITES = [
     'category-dev@cn', 'apple-cn', 'microsoft@cn', 'bing@cn',
     'steam@cn', 'xbox@cn', 'disney@cn', 'youtube@cn'
+  ];
+
+  // 国内视频与直播平台显式直连，避免专用域名未收录到 cn 时落入代理兜底。
+  // Bilibili 单独保留可切换的策略组，默认 DIRECT；字节共用域名由下面的分层规则处理。
+  var CN_VIDEO_GEOSITES = [
+    'douyin', 'iqiyi', 'youku', 'kuaishou', 'hunantv',
+    'douyu', 'huya', 'le', 'pptv', 'cctv'
   ];
 
   // 保留订阅原始规则的组（机场自建服务，规则内容只有机场自己知道）
@@ -217,6 +224,11 @@ function main(config, profileName) {
     rules.push('GEOSITE,bytedance,DIRECT');
   }
 
+  // 5.6e 国内视频：广告拦截、TikTok 境外分类优先，其余平台与 CDN 直连。
+  CN_VIDEO_GEOSITES.forEach(function (site) {
+    rules.push('GEOSITE,' + site + ',DIRECT');
+  });
+
   // 5.7 分类规则
   GEO_MAP.forEach(function (m) {
     if (built[m[1]]) rules.push('GEOSITE,' + m[0] + ',' + m[1]);
@@ -226,7 +238,7 @@ function main(config, profileName) {
   if (built['📲 Telegram']) rules.push('GEOIP,telegram,📲 Telegram,no-resolve');
   // OCI 公开 IP 段，覆盖 SSH / API 等直接用 IP 发起的连接。
   // no-resolve 是关键：域名请求不在这里解析比对，仍按上面的域名规则走，
-  // 托管在 OCI 上的境外站点因此不会被误判直连。
+  // 托管在 OCI 上的站点因此不会覆盖原有的域名分流策略。
   if (built[ORC]) rules.push('RULE-SET,my-oracle-ip,' + ORC + ',no-resolve');
 
   // 5.9 兜底顺序：国内直连 -> 境外走主力 -> 其余进兜底组

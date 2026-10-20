@@ -14,7 +14,7 @@
 | 2 | 通用大类：广告、国内域名、各厂商与流媒体 | 本地 `geosite.dat` | 零维护，随 Verge 的 geo 数据更新 |
 | 3 | 机场自建服务（如 Emby） | 订阅原始规则 | 脚本按组名自动提取保留 |
 
-规则总量从 10000+ 条降到约 180 条，其中大部分还是第 3 层保留下来的，覆盖面反而更大——`geosite:cn` 一个分类就有 11 万条国内域名。
+规则总量从 10000+ 条降到约 200 条，其中大部分还是第 3 层保留下来的，覆盖面反而更大——`geosite:cn` 一个分类就有 11 万条国内域名。
 
 ## 依赖
 
@@ -62,6 +62,7 @@ payload:
 - `KEEP_GROUPS` — 需要保留订阅原始规则的组
 - `DIRECT_FIRST` — 默认直连的组，见下
 - `CN_DIRECT_GEOSITES` — 专用分类中应当优先直连的中国大陆子集
+- `CN_VIDEO_GEOSITES` — 显式直连的国内视频与直播平台分类
 - `TIERS` — 自动兜底组的节点优先级
 - `MAIN` — 主力组名称
 
@@ -72,7 +73,7 @@ payload:
 默认直连，同时保留全部节点，需要时在面板一键切回代理。
 
 ```js
-var DIRECT_FIRST = ['📺 Bilibili', '☁️ Oracle'];
+var DIRECT_FIRST = ['📺 Bilibili'];
 ```
 
 B 站属于这类：`geosite:bilibili` 把视频 CDN（`bilivideo.com`、`hdslb.com`、`acgvideo.com`
@@ -95,9 +96,22 @@ Apple、Microsoft、Steam 等完整分类同时包含境内、境外服务，不
 另外，`bing` 和 `xbox` 必须放在 `microsoft` 之前；后者包含前两者，反过来排列会让
 「Bing」「Xbox」两个独立组永远无法命中。
 
+### 国内视频与直播
+
+B 站保留「📺 Bilibili」组，默认选择 `DIRECT`；抖音、西瓜及字节共用 CDN 由上面的
+字节规则直连。`CN_VIDEO_GEOSITES` 另行显式覆盖抖音、爱奇艺、优酷、快手（含 AcFun）、
+芒果 TV、斗鱼、虎牙、乐视、PPTV、央视，位置在广告拦截和字节境外子集之后、通用分类之前。
+
+这些平台不能只依赖 `geosite:cn`：本机 2026-10-20 更新后的 geosite 中，`71.am`（爱奇艺）、
+`youkuhonor.com`（优酷）、`kskwai.com` / `kuaishouzt.com`（快手）已在各自平台分类内，
+却不在 `cn` 中。显式匹配平台分类可避免它们落入代理兜底，也会随 geodata 更新获得新域名。
+腾讯视频、咪咕视频及其 CDN 仍由 `geosite:cn` 直连；广告域名继续优先拦截。
+
 ### Oracle 云
 
-`☁️ Oracle` 组同样默认直连。OCI 在国内可以直连，自己的实例绕一趟境外中转只是白白加延迟。
+`☁️ Oracle` 组默认选择「🚀 主力节点」，Oracle / OCI 域名和直接访问的 OCI IP 均走代理。
+仍保留 `DIRECT` 作为手动选项。已有客户端会记住旧选择，从旧版脚本升级后需将 Oracle 组
+从 `DIRECT` 切到「🚀 主力节点」，仅修改成员顺序不会清除已保存的选择。
 
 覆盖分三层，缺一层就会漏：
 
@@ -112,7 +126,7 @@ Apple、Microsoft、Steam 等完整分类同时包含境内、境外服务，不
 分类里的 `addthis.com` 等追踪域名则更早被广告拦截挡下。
 
 IP 段那条带 **`no-resolve`**，这是关键：域名请求不在这里解析比对，仍按上面的域名规则走。
-否则托管在 OCI 上的境外站点会被这 1107 条 CIDR 误判成直连。它只负责兜住 SSH、API
+否则托管在 OCI 上的站点可能被这 1107 条 CIDR 覆盖原有域名策略。它只负责兜住 SSH、API
 这类直接用 IP 发起、匹配不到域名的连接。
 
 `oracle-ip.yaml` 由官方 [public_ip_ranges.json](https://docs.oracle.com/iaas/tools/public_ip_ranges.json)
@@ -147,11 +161,12 @@ verge-script.js      Verge Script 扩展，策略组与规则在这里生成
 6. Apple TV、Oracle 云补充域名
 7. Apple / Microsoft / Steam 等中国大陆子集 → 直连
 8. TikTok / 字节境外子集 → Tiktok 组；其余字节域名 → 直连
-9. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
-10. 开发资源（npm / pypi / crates / GitHub）
-11. 其余 AI 服务
-12. 流媒体、社交、厂商、游戏、`geosite:oracle`
-13. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
-14. `geosite:cn` + `GEOIP:CN` → 直连
-15. `geosite:geolocation-!cn` → 主力节点
-16. 兜底组
+9. 国内视频与直播平台分类 → 直连
+10. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
+11. 开发资源（npm / pypi / crates / GitHub）
+12. 其余 AI 服务
+13. 流媒体、社交、厂商、游戏、`geosite:oracle`
+14. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
+15. `geosite:cn` + `GEOIP:CN` → 直连
+16. `geosite:geolocation-!cn` → 主力节点
+17. 兜底组
