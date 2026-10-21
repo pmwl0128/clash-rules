@@ -6,3 +6,5 @@ payload:
   - '+.mirrors.ustc.edu.cn'
   - '+.mirror.nju.edu.cn'
   - '+.pypi.doubanio.com'
+  # Vast.ai 控制台与 API：不在 geosite 内会落入兜底组；2026-10-21 实测直连比新加坡节点快约 1.6 倍
+  - '+.vast.ai'
