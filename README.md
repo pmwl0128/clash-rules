@@ -6,15 +6,17 @@
 
 机场订阅自带的规则通常是内联的上万条域名列表，为兼容所有客户端（Surge / QuantumultX / 原版 Clash）而写，无法使用 mihomo 的 `GEOSITE`。规则之间缺少分类边界，容易出现**前面的规则把后面的策略组整个遮蔽**——某个组在面板上可选，实际却从未参与过匹配。
 
-本仓库改用分层结构，把"通用"和"个性化"分开：
+本仓库改用分层结构，把"通用"和"个性化"分开。下表的「顺序」即实际匹配的先后，数字越小越先命中：
 
-| 层 | 内容 | 载体 | 维护方式 |
+| 顺序 | 内容 | 载体 | 维护方式 |
 |---|---|---|---|
-| 1 | 个人覆盖层：强制直连 / 强制代理 / 黑名单 / 专用应用 | 本仓库 `providers/` | 改完 `git push`，各机器按周期自动同步 |
-| 2 | 通用大类：广告、国内域名、各厂商与流媒体 | 本地 `geosite.dat` | 零维护，随 Verge 的 geo 数据更新 |
-| 3 | 机场自建服务（如 Emby） | 订阅原始规则 | 脚本按组名自动提取保留 |
+| 1 | 机场自建服务（如 Emby） | 订阅原始规则 | 脚本按组名自动提取保留 |
+| 2 | 个人覆盖层：强制直连 / 强制代理 / 黑名单 / 专用应用 | 本仓库 `providers/` | 改完 `git push`，各机器按周期自动同步 |
+| 3 | 通用大类：广告、国内域名、厂商与流媒体、Play 下载 CDN | 本地 `geosite.dat` + 脚本 | 零维护，随 Verge 的 geo 数据更新 |
 
-规则总量从 10000+ 条降到约 200 条，其中大部分还是第 3 层保留下来的，覆盖面反而更大——`geosite:cn` 一个分类就有 11 万条国内域名。
+规则总量从 10000+ 条降到约 200 条，其中大部分还是第 1 层保留下来的，覆盖面反而更大——`geosite:cn` 一个分类就有 11 万条国内域名。
+
+按组名保留的机场规则排在个人覆盖层**之前**是有意的：机场自建服务（Emby、私有 tracker 等）只有机场自己知道域名，个人覆盖层里写错的条目不应该抢在它们前面。
 
 ## 依赖
 
@@ -132,9 +134,34 @@ IP 段那条带 **`no-resolve`**，这是关键：域名请求不在这里解析
 `oracle-ip.yaml` 由官方 [public_ip_ranges.json](https://docs.oracle.com/iaas/tools/public_ip_ranges.json)
 生成，是静态快照，不会自动跟上游走。Oracle 加了新区域再重新抓一次即可。
 
+### Google Play 下载
+
+商店能正常浏览、应用也能搜到，但所有更新都卡在 0%、反复提示「无法安装」时，先看这一节。
+
+Play 点更新后会拿到一个签名下载地址，主机名形如 `rr1---sn-2x3eenee.xn--ngstr-lra8j.com`
+（`xn--ngstr-lra8j` 就是 `gvt1` 的 punycode 写法）。这类主机由 Google 解析到**国内 GGC 边缘**
+（实测 `114.250.63.2`，北京联通），本应直连取包。一旦被 `geosite:geolocation-!cn` 判成境外、
+送去代理出口，边缘会在 TLS 握手阶段直接断开，Cronet 报 `ERR_CONNECTION_CLOSED`，Play 报
+`CANNOT_CONNECT`，重试永远停在 0%。
+
+因此脚本单独建了「📥 Play 下载」组，默认 `DIRECT`，只匹配签名主机：
+
+```
+DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\.xn--ngstr-lra8j\.com,📥 Play 下载
+```
+
+- 只放行签名 CDN。`play-fe.googleapis.com`、`android.clients.google.com` 等商店 API 仍走代理，
+  进商店、登录、同步都不受影响。
+- `redirector.gvt1.com` 这类普通 gvt1 主机不受影响（它们本来就该走代理）。
+- 万一以后 Play 改用境外边缘（下载 URL 指向境外 IP），在面板把该组切回「主力节点」即可，不用改脚本。
+- 已经卡住的下载要**先取消再重试**。下载队列会缓存旧 token 反复重试同一个坏地址，不取消不会自愈。
+
 ### 换机场
 
 脚本不含任何机场相关信息，换订阅可直接沿用。只需把 `KEEP_GROUPS` 改成新机场自建服务的组名（没有就留空数组）。
+
+订阅自带的 `rule-providers` 会与脚本生成的**合并保留**（同名以仓库为准），所以新机场用
+`RULE-SET` 写的自建服务规则在被 `KEEP_GROUPS` 提取后依然能加载。
 
 ## 结构
 
@@ -157,16 +184,17 @@ verge-script.js      Verge Script 扩展，策略组与规则在这里生成
 2. `agy.exe` 进程 → Antigravity 组
 3. 机场自建服务（订阅保留）
 4. 个人覆盖层（`reject` / `direct` / `proxy`）
-5. 广告拦截
-6. Apple TV、Oracle 云补充域名
-7. Apple / Microsoft / Steam 等中国大陆子集 → 直连
-8. TikTok / 字节境外子集 → Tiktok 组；其余字节域名 → 直连
-9. 国内视频与直播平台分类 → 直连
-10. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
-11. 开发资源（npm / pypi / crates / GitHub）
-12. 其余 AI 服务
-13. 流媒体、社交、厂商、游戏、`geosite:oracle`
-14. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
-15. `geosite:cn` + `GEOIP:CN` → 直连
-16. `geosite:geolocation-!cn` → 主力节点
-17. 兜底组
+5. Google Play 下载 CDN → 「📥 Play 下载」组（默认直连）
+6. 广告拦截
+7. Apple TV、Oracle 云补充域名
+8. Apple / Microsoft / Steam 等中国大陆子集 → 直连
+9. TikTok / 字节境外子集 → Tiktok 组；其余字节域名 → 直连
+10. 国内视频与直播平台分类 → 直连
+11. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
+12. 开发资源（npm / pypi / crates / GitHub）
+13. 其余 AI 服务
+14. 流媒体、社交、厂商、游戏、`geosite:oracle`
+15. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
+16. `geosite:cn` + `GEOIP:CN` → 直连
+17. `geosite:geolocation-!cn` → 主力节点
+18. 兜底组

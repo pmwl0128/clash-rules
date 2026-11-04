@@ -15,10 +15,11 @@ function main(config, profileName) {
   var AGY  = '🚀 Antigravity';
   var ORC  = '☁️ Oracle';
   var TKT  = '🌏 Tiktok';
+  var PDL  = '📥 Play 下载';   // Google Play 下载 CDN，默认直连，见 5.4b
 
   // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
   // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
-  var DIRECT_FIRST = ['📺 Bilibili'];
+  var DIRECT_FIRST = ['📺 Bilibili', '📥 Play 下载'];
 
   // 专用分类里明确标记为中国大陆可直连的子集。必须放在完整分类之前，
   // 避免 Apple / Microsoft / Steam 等国内 CDN 被专用组先截获后绕境外。
@@ -93,7 +94,7 @@ function main(config, profileName) {
     '📺 Emby影院', '📺 Bilibili', '🌏 巴哈姆特',
     '📲 Telegram', '🌏 Twitter', '🌏 Discord', '🌏 Tiktok', '🌏 Dropbox',
     '🍎 Apple', '🍎 Apple TV', 'Ⓜ️ 微软', '✈️ Bing', '☁️ Oracle',
-    '🌏 Steam', '🌏 Xbox', '🌏 PrivateTracker', '🌏 GFWlist'
+    '🌏 Steam', '🌏 Xbox', '🌏 PrivateTracker', '🌏 GFWlist', '📥 Play 下载'
   ];
   // ============ 配置区结束 ============
 
@@ -132,6 +133,9 @@ function main(config, profileName) {
       interval: 86400, proxy: MAIN
     };
   }
+  // 合并而非整体覆盖：订阅可能自带 rule-provider，5.3 按组名保留的规则仍会引用它们。
+  // 直接替换会让这些 RULE-SET 找不到 provider，内核会拒绝加载整份配置。
+  var inheritedRP = config['rule-providers'] || {};
   config['rule-providers'] = {
     'my-antigravity': prov('antigravity'),
     'my-direct':      prov('direct'),
@@ -140,6 +144,9 @@ function main(config, profileName) {
     'my-oracle':      prov('oracle'),
     'my-oracle-ip':   prov('oracle-ip', 'ipcidr')
   };
+  Object.keys(inheritedRP).forEach(function (k) {
+    if (!config['rule-providers'][k]) config['rule-providers'][k] = inheritedRP[k];
+  });
 
   // ---- 4. 策略组 ----
   var groups = [];
@@ -185,6 +192,8 @@ function main(config, profileName) {
   ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']
     .forEach(function (c) { rules.push('IP-CIDR,' + c + ',DIRECT,no-resolve'); });
   rules.push('IP-CIDR6,fe80::/10,DIRECT,no-resolve');
+  rules.push('IP-CIDR6,fc00::/7,DIRECT,no-resolve');
+  rules.push('IP-CIDR6,::1/128,DIRECT,no-resolve');
 
   // 5.2 agy —— 进程规则最优先，域名规则兜底
   rules.push('PROCESS-NAME,agy.exe,' + AGY);
@@ -197,6 +206,16 @@ function main(config, profileName) {
   rules.push('RULE-SET,my-reject,' + ADS);
   rules.push('RULE-SET,my-direct,DIRECT');
   rules.push('RULE-SET,my-proxy,' + MAIN);
+
+  // 5.4b Google Play 下载 CDN
+  // 商店里点更新后，Play 会跳到签名主机 rrN---sn-xxxx.xn--ngstr-lra8j.com（xn--ngstr-lra8j 即 punycode 的 gvt1）。
+  // 这类主机由 Google 解析到国内 GGC 边缘（实测 114.250.63.2，北京联通），本来该直连取包；
+  // 一旦被 geolocation-!cn 送去境外出口，TLS 握手会被边缘重置（ERR_CONNECTION_CLOSED），
+  // 表现就是所有应用卡 0%、提示「无法安装」。所以单独成组并默认 DIRECT。
+  // 若哪天 Play 改用境外边缘（下载 URL 指向境外 IP），把本组在面板切回「主力节点」即可，不用改脚本。
+  if (built[PDL]) {
+    rules.push('DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\\.xn--ngstr-lra8j\\.com,' + PDL);
+  }
 
   // 5.5 广告拦截
   rules.push('GEOSITE,category-ads-all,' + ADS);
