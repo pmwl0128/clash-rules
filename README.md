@@ -60,6 +60,11 @@
 6. **Oracle**：`my-oracle` 域名 + `my-oracle-ip` 公开 IP 段（带 `no-resolve`）→
    「☁️ Oracle」，默认主力节点，需要直连时在面板切 DIRECT。
 
+### 面板顺序
+
+节点容器组（默认 `Premium`）置顶——其它组的成员列表都引用它，它才是真正的顶层选择；
+随后是脚本自建的四个组；再往后是机场原有的服务组，顺序不变。
+
 ### 修正机场规则
 
 - **ccTLD 级后缀**：机场 Google 组里有 `DOMAIN-SUFFIX,co,Google`、`DOMAIN-SUFFIX,hk,Google`

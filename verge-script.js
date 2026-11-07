@@ -62,7 +62,7 @@ function main(config, profileName) {
     return out;
   }
 
-  // ---- 2. 策略组（插在面板最前面，机场原有的 47 个组原样保留在下面） ----
+  // ---- 2. 策略组 ----
   var us = [], rest = [];
   names.forEach(function (n) {
     if (n.indexOf('🇺🇸') === 0) us.push(n); else rest.push(n);
@@ -77,7 +77,13 @@ function main(config, profileName) {
     { name: ORC, type: 'select', proxies: uniq([upstream].concat(names, ['DIRECT'])) },
     { name: ADS, type: 'select', proxies: ['REJECT', 'DIRECT'] }
   ];
-  config['proxy-groups'] = ourGroups.concat(airportGroups);
+  // 面板顺序：节点容器组（Premium）置顶——其它组的成员列表都引用它，是真正的
+  // 顶层选择；其次是本脚本的四个组；机场原有的服务组顺序不变，跟在后面。
+  var top = [], other = [];
+  airportGroups.forEach(function (g) {
+    if (g.name === upstream) top.push(g); else other.push(g);
+  });
+  config['proxy-groups'] = top.concat(ourGroups, other);
 
   // ---- 3. rule-provider（个人层，跟仓库走；订阅自带的合并保留） ----
   function prov(name, behavior) {
