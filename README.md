@@ -1,36 +1,101 @@
 # clash-rules
 
-自用的 Clash 分流策略。订阅只提供节点，分流规则全部由本仓库接管。
+自用的 Clash 分流策略。机场订阅提供节点与通用分流，本仓库只补机场没有的个人层。
 
-## 为什么
+## 为什么现在只补不改（2026-11）
 
-机场订阅自带的规则通常是内联的上万条域名列表，为兼容所有客户端（Surge / QuantumultX / 原版 Clash）而写，无法使用 mihomo 的 `GEOSITE`。规则之间缺少分类边界，容易出现**前面的规则把后面的策略组整个遮蔽**——某个组在面板上可选，实际却从未参与过匹配。
+机场订阅这次更新后自带完整的服务分组：47 个策略组、约 1.9 万条规则，覆盖 AI、
+流媒体、社交、云盘、游戏、开发、国内服务等分类，其中 9 个组默认直连。按旧方案用
+`GEOSITE` 重建全部分流已经没有收益，反而会：
 
-本仓库改用分层结构，把"通用"和"个性化"分开。下表的「顺序」即实际匹配的先后，数字越小越先命中：
+- 把 47 个组换成本仓库的 30 多个组，丢掉 Spotify、Prime Video、Hulu、DAZN、Docker、
+  npm、谷歌云盘、PikPak、Epic、PlayStation、Nintendo 等组的独立控制，以及它们
+  「B 站 / Steam / Epic / PS / Xbox / Nintendo / 微软云盘 / PrivateTracker / 国内服务
+  默认直连」的设置；
+- 因为 `KEEP_GROUPS` 对不上新组名（机场现在叫「守候影院」「SNTP」），丢掉机场自建的
+  Emby 规则；Epic / PS / Nintendo 这些在 geosite 里没有对应分类的流量也会退回代理。
 
-| 顺序 | 内容 | 载体 | 维护方式 |
-|---|---|---|---|
-| 1 | 机场自建服务（如 Emby） | 订阅原始规则 | 脚本按组名自动提取保留 |
-| 2 | 个人覆盖层：强制直连 / 强制代理 / 黑名单 / 专用应用 | 本仓库 `providers/` | 改完 `git push`，各机器按周期自动同步 |
-| 3 | 通用大类：广告、国内域名、厂商与流媒体、Play 下载 CDN | 本地 `geosite.dat` + 脚本 | 零维护，随 Verge 的 geo 数据更新 |
+所以脚本退化为薄覆盖层：机场规则原样保留、顺序不动，只在最前面插 15 条个人规则，
+再删掉机场规则里明确写错的条目。
 
-规则总量从 10000+ 条降到约 200 条，其中大部分还是第 1 层保留下来的，覆盖面反而更大——`geosite:cn` 一个分类就有 11 万条国内域名。
+| 层 | 内容 | 载体 |
+|---|---|---|
+| 1 | 本机 / 私网 / IPv6 直连 | 脚本内联 |
+| 2 | 广告拦截、强制直连、强制代理、Antigravity、Oracle | `providers/`（规则集） |
+| 3 | Google Play 签名下载 CDN 直连 | 脚本内联 |
+| 4 | 机场原生规则 | 订阅 |
 
-按组名保留的机场规则排在个人覆盖层**之前**是有意的：机场自建服务（Emby、私有 tracker 等）只有机场自己知道域名，个人覆盖层里写错的条目不应该抢在它们前面。
+规则总数：机场 18,999 条 + 前置 15 条 = 19,014 条。
 
 ## 依赖
 
-- **Clash Verge Rev** + **mihomo (Clash.Meta)** 内核。`GEOSITE` 是 mihomo 专有语法，原版 Clash / Surge / QuantumultX 不支持。
-- 本地 `geosite.dat`（Verge 自带并自动更新）。
+- **Clash Verge Rev** + mihomo (Clash.Meta) 内核。`GEOSITE`、`DOMAIN-REGEX`、进程规则都是
+  mihomo 专有语法，原版 Clash / Surge / QuantumultX 不支持。
+- 本地 `geosite.dat`（Verge 自带并自动更新，广告拦截用其中的 `category-ads-all`）。
+- 机场的节点容器组名（脚本默认 `Premium`，见「换机场」）。
 
 ## 在新机器上启用
 
-1. 装 Clash Verge Rev，导入你的机场订阅
+1. 装 Clash Verge Rev，导入机场订阅
 2. 订阅卡片右键 → **编辑扩展配置** → 切到 **Script** 标签
 3. 把 [`verge-script.js`](verge-script.js) 全文粘贴进去，保存
 4. 点一下订阅卡片重新应用配置
 
 完成。`providers/` 下的规则会自动从本仓库拉取，无需在新机器上做任何额外配置。
+
+回滚：把 Script 恢复成 `function main(config) { return config; }`，即回到机场原配置。
+
+## 脚本做了什么
+
+### 前置的 15 条规则
+
+1. **本机与私网**：`127/8`、`100.64/10`、`fe80::/10`、`fc00::/7`、`::1/128` 直连
+   （机场只给了 10/8、172.16/12、192.168/16）。
+2. **广告拦截**：个人黑名单 + `GEOSITE,category-ads-all` → 「🛑 广告拦截」。
+   机场没有一条 REJECT 规则，广告原本是跟着服务组走代理的。
+3. **个人覆盖层**：`my-direct` → DIRECT，`my-proxy` → 主力节点。
+4. **Play 下载**：签名主机 `DOMAIN-REGEX` → 「📥 Play 下载」，默认 DIRECT，见下节。
+5. **Antigravity**：`agy.exe` 进程规则 + `my-antigravity` 域名 → 「🚀 Antigravity」，
+   美国节点优先（需要与其它 AI 服务不同的出口）。
+6. **Oracle**：`my-oracle` 域名 + `my-oracle-ip` 公开 IP 段（带 `no-resolve`）→
+   「☁️ Oracle」，默认主力节点，需要直连时在面板切 DIRECT。
+
+### 修正机场规则
+
+- **ccTLD 级后缀**：机场 Google 组里有 `DOMAIN-SUFFIX,co,Google`、`DOMAIN-SUFFIX,hk,Google`
+  等 28 条单标签后缀，是 `google.com.xx` 被生成器截断的产物，会把所有 `.co` `.hk` `.tw`
+  `.sg` `.my` `.pk` `.vn` 等域名送进 Google 组。这些域名本来就被 `DOMAIN-SUFFIX,google.com`
+  覆盖，脚本直接删掉这 28 条，不损失任何归属。
+- **重复规则**：`GEOIP,CN` 两条、微信 6 条各重复一次，脚本去重。
+- **失效的进程规则**：机场把 `find-process-mode` 设成 `off`，它自带的 66 条 `PROCESS-NAME`
+  从不生效；脚本改成 `strict`，只在遇到进程规则时才查进程。
+
+### 没动的上游问题
+
+- 「国内服务」里的 `DOMAIN-SUFFIX,ms` 是 `.ms` 顶级域，会把极少数 .ms 域名直连，影响可忽略。
+- 47 个组全是 `select`，没有测速 / 故障转移组，节点挂了要在面板手动切。
+- 「谷歌云盘」组里包含 `www.googleapis.com` 这类通用 Google API，属于机场自己的分类选择，未改。
+
+## Google Play 下载
+
+商店能正常浏览、应用也能搜到，但所有更新都卡在 0%、反复提示「无法安装」时，先看这一节。
+
+Play 点更新后会拿到一个签名下载地址，主机名形如 `rr1---sn-2x3eenee.xn--ngstr-lra8j.com`
+（`xn--ngstr-lra8j` 就是 `gvt1` 的 punycode 写法）。这类主机由 Google 解析到**国内 GGC
+边缘**（实测 `114.250.63.2`，北京联通），本应直连取包。一旦被送去代理出口，边缘会在 TLS
+握手阶段直接断开，Cronet 报 `ERR_CONNECTION_CLOSED`，Play 报 `CANNOT_CONNECT`，重试永远停在 0%。
+
+机场把 `xn--ngstr-lra8j.com` 收进了「Google」组（默认走代理），所以脚本单独放行签名主机：
+
+```
+DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\.xn--ngstr-lra8j\.com,📥 Play 下载
+```
+
+- 只放行签名 CDN。`play-fe.googleapis.com`、`android.clients.google.com` 等商店 API 仍走代理，
+  进商店、登录、同步都不受影响。
+- `redirector.gvt1.com` 这类普通 gvt1 主机不受影响（它们本来就该走代理）。
+- 万一以后 Play 改用境外边缘（下载 URL 指向境外 IP），在面板把该组切回「Premium」即可。
+- 已经卡住的下载要**先取消再重试**。下载队列会缓存旧 token 反复重试同一个坏地址，不取消不会自愈。
 
 ## 自定义
 
@@ -42,10 +107,10 @@
 - `proxy.yaml` — 强制走代理
 - `reject.yaml` — 屏蔽
 - `antigravity.yaml` — Antigravity CLI 专用出口
-- `oracle.yaml` — Oracle 云补充域名
+- `oracle.yaml` — Oracle 云域名
 - `oracle-ip.yaml` — Oracle 云 IP 段（`ipcidr` 类型）
 
-前四个优先级高于所有 `GEOSITE` 分类，可用来覆盖 geosite 的判断。
+这六层规则都插在机场规则之前，优先级高于所有机场分类。
 
 格式：
 
@@ -55,113 +120,12 @@ payload:
   - 'exact.example.com'  # 精确匹配
 ```
 
-### 增删策略组 / 调整分类
+### 策略组与常量
 
 改 `verge-script.js` 顶部的配置区：
 
-- `GROUPS` — 策略组清单，顺序即面板显示顺序
-- `GEO_MAP` — geosite 分类到策略组的映射，**顺序即匹配优先级**
-- `KEEP_GROUPS` — 需要保留订阅原始规则的组
-- `DIRECT_FIRST` — 默认直连的组，见下
-- `CN_DIRECT_GEOSITES` — 专用分类中应当优先直连的中国大陆子集
-- `CN_VIDEO_GEOSITES` — 显式直连的国内视频与直播平台分类
-- `TIERS` — 自动兜底组的节点优先级
-- `MAIN` — 主力组名称
-
-### 让某个组默认直连
-
-策略组默认选中成员列表的第一项。一般组的顺序是 `主力节点 / 兜底 / DIRECT / 各节点`，
-所以默认走代理。把组名加进 `DIRECT_FIRST`，该组会改成 `DIRECT / 主力节点 / 兜底 / 各节点`，
-默认直连，同时保留全部节点，需要时在面板一键切回代理。
-
-```js
-var DIRECT_FIRST = ['📺 Bilibili'];
-```
-
-B 站属于这类：`geosite:bilibili` 把视频 CDN（`bilivideo.com`、`hdslb.com`、`acgvideo.com`
-等 53 条）一并算进去，走代理等于让整条视频流绕境外中转。实测 `upos-sz-mirrorcos.bilivideo.com`
-首字节直连 0.23s、走新加坡节点 2.13s，差 9 倍，表现就是频繁卡顿。
-
-### 中国大陆子集与字节跳动
-
-Apple、Microsoft、Steam 等完整分类同时包含境内、境外服务，不能简单把整个策略组默认改成
-直连。脚本会先匹配上游明确维护的大陆子集（如 `apple-cn`、`microsoft@cn`、
-`steam@cn`），让中国区 CDN、系统更新等直连，再把其余域名交给对应策略组。
-
-字节跳动使用同样的分层思路，但需要覆盖抖音与头条共用的 `snssdk.com` 等域名：
-
-1. `category-ads-all` 先拦截带 `@ads` 标记的域名
-2. `tiktok` 与 `bytedance@!cn` 走「Tiktok」组
-3. 剩余 `bytedance`（抖音、头条及共用基础设施）直连
-
-顺序不能颠倒，否则要么抖音共用域名落入代理兜底，要么 TikTok 被误判为直连。
-另外，`bing` 和 `xbox` 必须放在 `microsoft` 之前；后者包含前两者，反过来排列会让
-「Bing」「Xbox」两个独立组永远无法命中。
-
-### 国内视频与直播
-
-B 站保留「📺 Bilibili」组，默认选择 `DIRECT`；抖音、西瓜及字节共用 CDN 由上面的
-字节规则直连。`CN_VIDEO_GEOSITES` 另行显式覆盖抖音、爱奇艺、优酷、快手（含 AcFun）、
-芒果 TV、斗鱼、虎牙、乐视、PPTV、央视，位置在广告拦截和字节境外子集之后、通用分类之前。
-
-这些平台不能只依赖 `geosite:cn`：本机 2026-10-20 更新后的 geosite 中，`71.am`（爱奇艺）、
-`youkuhonor.com`（优酷）、`kskwai.com` / `kuaishouzt.com`（快手）已在各自平台分类内，
-却不在 `cn` 中。显式匹配平台分类可避免它们落入代理兜底，也会随 geodata 更新获得新域名。
-腾讯视频、咪咕视频及其 CDN 仍由 `geosite:cn` 直连；广告域名继续优先拦截。
-
-### Oracle 云
-
-`☁️ Oracle` 组默认选择「🚀 主力节点」，Oracle / OCI 域名和直接访问的 OCI IP 均走代理。
-仍保留 `DIRECT` 作为手动选项。已有客户端会记住旧选择，从旧版脚本升级后需将 Oracle 组
-从 `DIRECT` 切到「🚀 主力节点」，仅修改成员顺序不会清除已保存的选择。
-
-覆盖分三层，缺一层就会漏：
-
-| 规则 | 位置 | 作用 |
-|---|---|---|
-| `RULE-SET,my-oracle` | 所有 `GEOSITE` 分类之前 | `providers/oracle.yaml`，补 geosite 漏掉的 OCI 域名 |
-| `GEOSITE,oracle` | 分类段末尾 | geosite 自带的 19 条，含 `oracle.com`、`oraclecloud.com` |
-| `RULE-SET,my-oracle-ip` | `GEOSITE,cn` 之前 | `providers/oracle-ip.yaml`，OCI 公开 IP 段 |
-
-放在分类段**末尾**是有意的：`geosite:oracle` 里混了 `java.com`、`virtualbox.org`，
-排在 `category-dev` 之后它们才会归「开发资源」，不被 Oracle 组吃掉。
-分类里的 `addthis.com` 等追踪域名则更早被广告拦截挡下。
-
-IP 段那条带 **`no-resolve`**，这是关键：域名请求不在这里解析比对，仍按上面的域名规则走。
-否则托管在 OCI 上的站点可能被这 1107 条 CIDR 覆盖原有域名策略。它只负责兜住 SSH、API
-这类直接用 IP 发起、匹配不到域名的连接。
-
-`oracle-ip.yaml` 由官方 [public_ip_ranges.json](https://docs.oracle.com/iaas/tools/public_ip_ranges.json)
-生成，是静态快照，不会自动跟上游走。Oracle 加了新区域再重新抓一次即可。
-
-### Google Play 下载
-
-商店能正常浏览、应用也能搜到，但所有更新都卡在 0%、反复提示「无法安装」时，先看这一节。
-
-Play 点更新后会拿到一个签名下载地址，主机名形如 `rr1---sn-2x3eenee.xn--ngstr-lra8j.com`
-（`xn--ngstr-lra8j` 就是 `gvt1` 的 punycode 写法）。这类主机由 Google 解析到**国内 GGC 边缘**
-（实测 `114.250.63.2`，北京联通），本应直连取包。一旦被 `geosite:geolocation-!cn` 判成境外、
-送去代理出口，边缘会在 TLS 握手阶段直接断开，Cronet 报 `ERR_CONNECTION_CLOSED`，Play 报
-`CANNOT_CONNECT`，重试永远停在 0%。
-
-因此脚本单独建了「📥 Play 下载」组，默认 `DIRECT`，只匹配签名主机：
-
-```
-DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\.xn--ngstr-lra8j\.com,📥 Play 下载
-```
-
-- 只放行签名 CDN。`play-fe.googleapis.com`、`android.clients.google.com` 等商店 API 仍走代理，
-  进商店、登录、同步都不受影响。
-- `redirector.gvt1.com` 这类普通 gvt1 主机不受影响（它们本来就该走代理）。
-- 万一以后 Play 改用境外边缘（下载 URL 指向境外 IP），在面板把该组切回「主力节点」即可，不用改脚本。
-- 已经卡住的下载要**先取消再重试**。下载队列会缓存旧 token 反复重试同一个坏地址，不取消不会自愈。
-
-### 换机场
-
-脚本不含任何机场相关信息，换订阅可直接沿用。只需把 `KEEP_GROUPS` 改成新机场自建服务的组名（没有就留空数组）。
-
-订阅自带的 `rule-providers` 会与脚本生成的**合并保留**（同名以仓库为准），所以新机场用
-`RULE-SET` 写的自建服务规则在被 `KEEP_GROUPS` 提取后依然能加载。
+- `NODE` — 机场的节点容器组名，规则里当作「主力节点」
+- `ADS` / `AGY` / `ORC` / `PDL` — 四个自建组的组名
 
 ## 结构
 
@@ -171,30 +135,36 @@ providers/
   direct.yaml        强制直连
   proxy.yaml         强制代理
   reject.yaml        黑名单
-  oracle.yaml        Oracle 云补充域名
+  oracle.yaml        Oracle 云域名
   oracle-ip.yaml     Oracle 云公开 IP 段（官方 JSON 生成）
-verge-script.js      Verge Script 扩展，策略组与规则在这里生成
+verge-script.js      Verge Script 扩展，前置规则与规则清理
 ```
 
 ## 规则优先级
 
 从上到下依次匹配，命中即停：
 
-1. 本机与局域网 → 直连
-2. `agy.exe` 进程 → Antigravity 组
-3. 机场自建服务（订阅保留）
-4. 个人覆盖层（`reject` / `direct` / `proxy`）
-5. Google Play 下载 CDN → 「📥 Play 下载」组（默认直连）
-6. 广告拦截
-7. Apple TV、Oracle 云补充域名
-8. Apple / Microsoft / Steam 等中国大陆子集 → 直连
-9. TikTok / 字节境外子集 → Tiktok 组；其余字节域名 → 直连
-10. 国内视频与直播平台分类 → 直连
-11. AI 服务细分（Claude / OpenAI / Gemini / Cursor / Copilot / Perplexity）
-12. 开发资源（npm / pypi / crates / GitHub）
-13. 其余 AI 服务
-14. 流媒体、社交、厂商、游戏、`geosite:oracle`
-15. Telegram IP 段、Oracle 云 IP 段（均 `no-resolve`）
-16. `geosite:cn` + `GEOIP:CN` → 直连
-17. `geosite:geolocation-!cn` → 主力节点
-18. 兜底组
+1. 本机与私网 → 直连
+2. 广告拦截 → 「🛑 广告拦截」（REJECT）
+3. 个人覆盖层（`reject` / `direct` / `proxy`）
+4. Play 签名下载 CDN → 「📥 Play 下载」（默认直连）
+5. `agy.exe`、Antigravity 域名 → 「🚀 Antigravity」
+6. Oracle 域名、OCI IP 段（`no-resolve`） → 「☁️ Oracle」
+7. 以下是机场原生规则：守候影院 / SNTP → 各服务组 → 国内服务 →
+   `GEOSITE:cn`、`GEOIP:CN` → `MATCH` 漏网之鱼
+
+## 换机场
+
+脚本自身不含机场信息，只依赖一个组名：
+
+- 机场节点容器组不是 `Premium` 时，改脚本顶部的 `NODE`；
+- 找不到 `NODE` 时，脚本会自动挑一个「成员恰好是所有节点」的 `select` 组；
+- 连这种组也没有时退化为 `DIRECT`（这时 `my-proxy` 也会指向 DIRECT，实际等于不代理，需手动处理）。
+
+`providers/` 里的规则与机场无关，可以直接沿用。
+
+## 历史
+
+2026-11 之前，机场只给 3 个组、500 多条内联规则，本仓库用 `GEOSITE` 重建全部分流
+（约 180 条，含字节跳动的分层处理、B 站直连、Oracle 三层覆盖）。机场配置完善后这套
+重建方案已移除，需要时可以在 git 历史里找回。

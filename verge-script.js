@@ -1,274 +1,155 @@
-// Clash Verge Rev — Script 扩展
-// 作用：保留订阅节点与机场自建服务规则，其余分流规则全部由本脚本重建。
-// 依赖：mihomo (Clash.Meta) 内核的 GEOSITE 规则与本地 geosite.dat。
+// Clash Verge Rev — Script 扩展（薄覆盖层）
+//
+// 机场订阅自 2026-11 起自带完整的服务分组（47 个策略组、约 1.9 万条规则），
+// 本脚本不再重建分流，只在其上补几层个人规则：
+//
+//   1. 个人覆盖层：广告拦截 / 强制直连 / 强制代理 / Antigravity / Oracle
+//   2. Google Play 签名下载 CDN 直连（机场把它归进 Google 组，会被送代理）
+//   3. 修正机场规则里的已知问题：google.com.xx 被误写成 ccTLD 级后缀、重复规则、
+//      以及因 find-process-mode: off 而永远不生效的进程规则
+//   4. 补齐本机、私网、IPv6 直连（机场只给了 10/8、172.16/12、192.168/16）
+//
+// 机场原生规则原样保留、顺序不动；本脚本的规则插在最前面。
 // 仓库：https://github.com/pmwl0128/clash-rules
 
 function main(config, profileName) {
   delete config['global-client-fingerprint'];
-  // ============ 配置区：改这里即可，下面的逻辑不用动 ============
+
+  // ============ 配置区：改这里即可 ============
   var GH = 'https://raw.githubusercontent.com/pmwl0128/clash-rules/main/providers/';
 
-  var MAIN = '🚀 主力节点';    // 主力组（手选节点，改这里可自定义名称）
-  var AUTO = '♻️ GTM 兜底';     // 自动兜底组
-  var LEAK = '🐟 漏网之鱼';      // 总兜底
-  var ADS  = '🛑 广告拦截';
-  var AGY  = '🚀 Antigravity';
-  var ORC  = '☁️ Oracle';
-  var TKT  = '🌏 Tiktok';
-  var PDL  = '📥 Play 下载';   // Google Play 下载 CDN，默认直连，见 5.4b
+  // 机场的节点容器组：所有节点都挂在它下面，规则里当作「主力节点」用。
+  // 换机场后组名变了只改这一行；找不到时脚本会自动挑一个成员全是节点的组，再不行退化为 DIRECT。
+  var NODE = 'Premium';
 
-  // 默认应当直连的组：走本地/国内线路比绕代理快，DIRECT 置于组首成为默认项。
-  // 仍保留完整节点列表，需要时（如港澳台限定内容）在面板一键切代理。
-  var DIRECT_FIRST = ['📺 Bilibili', '📥 Play 下载'];
-
-  // 专用分类里明确标记为中国大陆可直连的子集。必须放在完整分类之前，
-  // 避免 Apple / Microsoft / Steam 等国内 CDN 被专用组先截获后绕境外。
-  var CN_DIRECT_GEOSITES = [
-    'category-dev@cn', 'apple-cn', 'microsoft@cn', 'bing@cn',
-    'steam@cn', 'xbox@cn', 'disney@cn', 'youtube@cn'
-  ];
-
-  // 国内视频与直播平台显式直连，避免专用域名未收录到 cn 时落入代理兜底。
-  // Bilibili 单独保留可切换的策略组，默认 DIRECT；字节共用域名由下面的分层规则处理。
-  var CN_VIDEO_GEOSITES = [
-    'douyin', 'iqiyi', 'youku', 'kuaishou', 'hunantv',
-    'douyu', 'huya', 'le', 'pptv', 'cctv'
-  ];
-
-  // 保留订阅原始规则的组（机场自建服务，规则内容只有机场自己知道）
-  // 脚本只按组名提取，不硬编码任何机场域名，因此可安全公开
-  var KEEP_GROUPS = ['📺 Emby影院'];
-
-  var CHECK_URL = 'http://cp.cloudflare.com/generate_204';
-  var INTERVAL = 120;
-  var LINE = 'GTM';
-  // GTM 兜底优先级：SG 满倍率 > JP > US > SG 低倍率 > TW > HK
-  var TIERS = [
-    { flag: '🇸🇬', fullRateOnly: true }, { flag: '🇯🇵' }, { flag: '🇺🇸' },
-    { flag: '🇸🇬' }, { flag: '🇨🇳' }, { flag: '🇭🇰' }
-  ];
-
-  // geosite 分类 -> 策略组。顺序即匹配优先级，越靠前越优先。
-  var GEO_MAP = [
-    // AI 服务（必须在 category-dev / geolocation-!cn 之前）
-    ['anthropic',        '💬 Claude'],
-    ['openai',           '💬 OpenAi'],
-    ['google-gemini',    '💬 Gemini'],
-    ['cursor',           '💬 Cursor'],
-    ['github-copilot',   '🛩 Copilot'],
-    ['perplexity',       '💬 Perplexity'],
-    // 开发资源（放在 AI 兜底之前，npm/pypi 才不会被 AI 分类吃掉）
-    ['category-dev',     '💻 开发资源'],
-    ['github',           '💻 开发资源'],
-    ['category-ai-!cn',  '🤖 AI 其他'],     // 其余 AI 服务兜底
-    // 流媒体
-    ['netflix',          '📺 Netflix'],
-    ['disney',           '📺 Disney'],
-    ['youtube',          '📺 YouTube'],
-    ['hbo',              '📺 HBOMAX'],
-    ['twitch',           '🐭 Twitch'],
-    ['bilibili',         '📺 Bilibili'],
-    ['bahamut',          '🌏 巴哈姆特'],
-    // 社交
-    ['telegram',         '📲 Telegram'],
-    ['twitter',          '🌏 Twitter'],
-    ['discord',          '🌏 Discord'],
-    // 厂商
-    ['apple',            '🍎 Apple'],
-    // bing / xbox 都被 microsoft 包含，必须放在 microsoft 前面，否则独立组永远不会命中
-    ['bing',             '✈️ Bing'],
-    ['xbox',             '🌏 Xbox'],
-    ['microsoft',        'Ⓜ️ 微软'],
-    ['dropbox',          '🌏 Dropbox'],
-    // 游戏与其它
-    ['steam',            '🌏 Steam'],
-    ['category-pt',      '🌏 PrivateTracker'],
-    ['oracle',           '☁️ Oracle']
-  ];
-
-  // 需要建的策略组（顺序即面板显示顺序）
-  var GROUPS = [
-    '🚀 Antigravity', '💬 Claude', '💬 OpenAi', '💬 Gemini', '💬 Cursor',
-    '🛩 Copilot', '💬 Perplexity', '🤖 AI 其他', '💻 开发资源',
-    '📺 Netflix', '📺 Disney', '📺 YouTube', '📺 HBOMAX', '🐭 Twitch',
-    '📺 Emby影院', '📺 Bilibili', '🌏 巴哈姆特',
-    '📲 Telegram', '🌏 Twitter', '🌏 Discord', '🌏 Tiktok', '🌏 Dropbox',
-    '🍎 Apple', '🍎 Apple TV', 'Ⓜ️ 微软', '✈️ Bing', '☁️ Oracle',
-    '🌏 Steam', '🌏 Xbox', '🌏 PrivateTracker', '🌏 GFWlist', '📥 Play 下载'
-  ];
+  var ADS = '🛑 广告拦截';
+  var AGY = '🚀 Antigravity';
+  var ORC = '☁️ Oracle';
+  var PDL = '📥 Play 下载';
   // ============ 配置区结束 ============
 
-  var proxies = config.proxies || [];
-  if (!proxies.length) return config;          // 保护：拿不到节点就原样返回
   var names = [];
-  proxies.forEach(function (p) { if (p && typeof p.name === 'string') names.push(p.name); });
-  if (!names.length) return config;
-
-  // ---- 1. GTM 兜底池 ----
-  function rate(n) { var m = n.match(/(\d+(?:\.\d+)?)x/); return m ? parseFloat(m[1]) : 1; }
-  var pool = [], seen = {};
-  TIERS.forEach(function (t) {
-    names.forEach(function (n) {
-      if (seen[n] || n.indexOf(t.flag) !== 0 || n.indexOf(LINE) < 0) return;
-      if (t.fullRateOnly && rate(n) < 1) return;
-      seen[n] = true; pool.push(n);
-    });
+  (config.proxies || []).forEach(function (p) {
+    if (p && typeof p.name === 'string') names.push(p.name);
   });
+  if (!names.length) return config; // 拿不到节点就原样返回，避免生成空组
 
-  // ---- 2. 保留机场自建服务规则 ----
-  // 机场官网一类域名不必单独保留：它们会落到 geosite:geolocation-!cn，同样走代理
-  var keep = [];
-  (config.rules || []).forEach(function (r) {
-    var s = String(r);
-    for (var i = 0; i < KEEP_GROUPS.length; i++) {
-      if (s.indexOf(KEEP_GROUPS[i]) >= 0) { keep.push(s); return; }
+  var airportGroups = config['proxy-groups'] || [];
+
+  // ---- 1. 找「主力节点」 ----
+  function isNodeGroup(g) {
+    if (g.type !== 'select') return false;
+    var m = g.proxies || [];
+    if (m.length !== names.length) return false;
+    for (var k = 0; k < names.length; k++) {
+      if (m.indexOf(names[k]) < 0) return false;
     }
-  });
+    return true;
+  }
+  var upstream = 'DIRECT';
+  for (var i = 0; i < airportGroups.length; i++) {
+    if (airportGroups[i].name === NODE) { upstream = NODE; break; }
+  }
+  if (upstream === 'DIRECT') {
+    for (var j = 0; j < airportGroups.length; j++) {
+      if (isNodeGroup(airportGroups[j])) { upstream = airportGroups[j].name; break; }
+    }
+  }
 
-  // ---- 3. rule-provider ----
+  function uniq(arr) {
+    var out = [], seen = {};
+    arr.forEach(function (x) { if (x && !seen[x]) { seen[x] = 1; out.push(x); } });
+    return out;
+  }
+
+  // ---- 2. 策略组（插在面板最前面，机场原有的 47 个组原样保留在下面） ----
+  var us = [], rest = [];
+  names.forEach(function (n) {
+    if (n.indexOf('🇺🇸') === 0) us.push(n); else rest.push(n);
+  });
+  // Antigravity 需要与其它环境不同的出口，美国节点优先，默认第一个美国节点
+  var agyMembers = uniq(us.concat([upstream, 'DIRECT'], rest));
+
+  var ourGroups = [
+    { name: AGY, type: 'select', proxies: agyMembers },
+    { name: PDL, type: 'select', proxies: uniq(['DIRECT'].concat([upstream], names)) },
+    // 机场没有任何 OCI 规则，默认与机场兜底一致走主节点，需要直连时在面板切 DIRECT
+    { name: ORC, type: 'select', proxies: uniq([upstream].concat(names, ['DIRECT'])) },
+    { name: ADS, type: 'select', proxies: ['REJECT', 'DIRECT'] }
+  ];
+  config['proxy-groups'] = ourGroups.concat(airportGroups);
+
+  // ---- 3. rule-provider（个人层，跟仓库走；订阅自带的合并保留） ----
   function prov(name, behavior) {
     return {
       type: 'http', behavior: behavior || 'domain', format: 'yaml',
       url: GH + name + '.yaml', path: './rules/' + name + '.yaml',
-      interval: 86400, proxy: MAIN
+      interval: 86400, proxy: upstream
     };
   }
-  // 合并而非整体覆盖：订阅可能自带 rule-provider，5.3 按组名保留的规则仍会引用它们。
-  // 直接替换会让这些 RULE-SET 找不到 provider，内核会拒绝加载整份配置。
-  var inheritedRP = config['rule-providers'] || {};
-  config['rule-providers'] = {
-    'my-antigravity': prov('antigravity'),
-    'my-direct':      prov('direct'),
-    'my-proxy':       prov('proxy'),
-    'my-reject':      prov('reject'),
-    'my-oracle':      prov('oracle'),
-    'my-oracle-ip':   prov('oracle-ip', 'ipcidr')
-  };
-  Object.keys(inheritedRP).forEach(function (k) {
-    if (!config['rule-providers'][k]) config['rule-providers'][k] = inheritedRP[k];
-  });
+  var providers = config['rule-providers'] || {};
+  providers['my-reject'] = prov('reject');
+  providers['my-direct'] = prov('direct');
+  providers['my-proxy'] = prov('proxy');
+  providers['my-antigravity'] = prov('antigravity');
+  providers['my-oracle'] = prov('oracle');
+  providers['my-oracle-ip'] = prov('oracle-ip', 'ipcidr');
+  config['rule-providers'] = providers;
 
-  // ---- 4. 策略组 ----
-  var groups = [];
-  groups.push({ name: MAIN, type: 'select', proxies: names });
-  if (pool.length) {
-    groups.push({ name: AUTO, type: 'fallback', proxies: pool,
-                  url: CHECK_URL, interval: INTERVAL, lazy: false });
-  }
-  var head = [MAIN];
-  if (pool.length) head.push(AUTO);
-  head.push('DIRECT');
-
-  GROUPS.forEach(function (g) {
-    var list;
-    if (g === AGY) {
-      // agy 需要与其它环境不同的出口，美国节点优先
-      var us = [], rest = [];
-      names.forEach(function (n) {
-        if (n.indexOf('🇺🇸') === 0 && n.indexOf(LINE) >= 0) us.push(n); else rest.push(n);
-      });
-      list = us.concat([MAIN]).concat(rest);
-    } else if (DIRECT_FIRST.indexOf(g) >= 0) {
-      list = ['DIRECT', MAIN].concat(pool.length ? [AUTO] : []).concat(names);
-    } else {
-      list = head.concat(names);
-    }
-    groups.push({ name: g, type: 'select', proxies: list });
-  });
-  groups.push({ name: ADS, type: 'select', proxies: ['REJECT', 'DIRECT'] });
-  groups.push({ name: LEAK, type: 'fallback',
-                proxies: (pool.length ? [MAIN, AUTO, 'DIRECT'] : [MAIN, 'DIRECT']),
-                url: CHECK_URL, interval: INTERVAL, lazy: false });
-  config['proxy-groups'] = groups;
-
-  // 已建组名集合，用于过滤无效引用
-  var built = {};
-  groups.forEach(function (g) { built[g.name] = true; });
-
-  // ---- 5. 规则 ----
+  // ---- 4. 前置规则 ----
   var rules = [];
 
-  // 5.1 本机与局域网
-  ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']
-    .forEach(function (c) { rules.push('IP-CIDR,' + c + ',DIRECT,no-resolve'); });
+  // 4.1 本机与私网（机场缺的几条）
+  ['127.0.0.0/8', '100.64.0.0/10'].forEach(function (c) {
+    rules.push('IP-CIDR,' + c + ',DIRECT,no-resolve');
+  });
   rules.push('IP-CIDR6,fe80::/10,DIRECT,no-resolve');
   rules.push('IP-CIDR6,fc00::/7,DIRECT,no-resolve');
   rules.push('IP-CIDR6,::1/128,DIRECT,no-resolve');
 
-  // 5.2 agy —— 进程规则最优先，域名规则兜底
-  rules.push('PROCESS-NAME,agy.exe,' + AGY);
-  rules.push('RULE-SET,my-antigravity,' + AGY);
-
-  // 5.3 机场自建服务
-  keep.forEach(function (r) { rules.push(r); });
-
-  // 5.4 个人覆盖层，优先于所有 geosite 分类
+  // 4.2 广告拦截
   rules.push('RULE-SET,my-reject,' + ADS);
-  rules.push('RULE-SET,my-direct,DIRECT');
-  rules.push('RULE-SET,my-proxy,' + MAIN);
-
-  // 5.4b Google Play 下载 CDN
-  // 商店里点更新后，Play 会跳到签名主机 rrN---sn-xxxx.xn--ngstr-lra8j.com（xn--ngstr-lra8j 即 punycode 的 gvt1）。
-  // 这类主机由 Google 解析到国内 GGC 边缘（实测 114.250.63.2，北京联通），本来该直连取包；
-  // 一旦被 geolocation-!cn 送去境外出口，TLS 握手会被边缘重置（ERR_CONNECTION_CLOSED），
-  // 表现就是所有应用卡 0%、提示「无法安装」。所以单独成组并默认 DIRECT。
-  // 若哪天 Play 改用境外边缘（下载 URL 指向境外 IP），把本组在面板切回「主力节点」即可，不用改脚本。
-  if (built[PDL]) {
-    rules.push('DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\\.xn--ngstr-lra8j\\.com,' + PDL);
-  }
-
-  // 5.5 广告拦截
   rules.push('GEOSITE,category-ads-all,' + ADS);
 
-  // 5.6 Apple TV：geosite 无此分类，显式补充（须在 GEOSITE,apple 之前）
-  if (built['🍎 Apple TV']) {
-    rules.push('DOMAIN-SUFFIX,tv.apple.com,🍎 Apple TV');
-    rules.push('DOMAIN-SUFFIX,appletv.com,🍎 Apple TV');
-  }
+  // 4.3 个人覆盖层
+  rules.push('RULE-SET,my-direct,DIRECT');
+  rules.push('RULE-SET,my-proxy,' + upstream);
 
-  // 5.6b Oracle 云：geosite:oracle 漏掉的 OCI 专有域名，须在分类规则之前
-  if (built[ORC]) rules.push('RULE-SET,my-oracle,' + ORC);
+  // 4.4 Google Play 签名下载 CDN
+  // 商店点更新后 Play 会跳到 rrN---sn-xxxx.xn--ngstr-lra8j.com（gvt1 的 punycode），
+  // 这类主机解析到国内 GGC 边缘，被送代理后 TLS 握手会被重置，表现为所有应用卡 0%。
+  // 机场把它收进了 Google 组（默认代理），所以这里单独放行签名主机。
+  rules.push('DOMAIN-REGEX,^rr[0-9]+---sn-[a-z0-9-]+\\.xn--ngstr-lra8j\\.com,' + PDL);
 
-  // 5.6c 专用分类中的中国大陆子集：先直连，再由完整分类处理其余域名。
-  CN_DIRECT_GEOSITES.forEach(function (site) {
-    rules.push('GEOSITE,' + site + ',DIRECT');
+  // 4.5 Antigravity：进程规则兜底（域名清单之外的请求），再按域名匹配
+  rules.push('PROCESS-NAME,agy.exe,' + AGY);
+  rules.push('PROCESS-NAME,agy,' + AGY);
+  rules.push('RULE-SET,my-antigravity,' + AGY);
+
+  // 4.6 Oracle / OCI：域名 + 公开 IP 段（IP 段带 no-resolve，不干扰域名规则）
+  rules.push('RULE-SET,my-oracle,' + ORC);
+  rules.push('RULE-SET,my-oracle-ip,' + ORC + ',no-resolve');
+
+  // ---- 5. 清理机场规则 ----
+  // 5.1 google.com.xx 被生成器截成了 ccTLD 级后缀：DOMAIN-SUFFIX,hk,Google 会吃掉所有 .hk 域名。
+  //     这些后缀本来就被 DOMAIN-SUFFIX,google.com 覆盖，删掉不损失任何归属。
+  var bogus = {};
+  ['ar', 'au', 'bo', 'br', 'co', 'cu', 'do', 'ec', 'eg', 'gt', 'hk', 'ly', 'mx', 'my',
+   'ni', 'pa', 'pe', 'ph', 'pk', 'pr', 'py', 'sg', 'sv', 'tr', 'tw', 'ua', 'uy', 'vn']
+    .forEach(function (cc) { bogus['DOMAIN-SUFFIX,' + cc + ',Google'] = true; });
+
+  // 5.2 顺带去重（GEOIP,CN 两条、微信 6 条各重复了一次）
+  var kept = [], seenRule = {};
+  (config.rules || []).forEach(function (rule) {
+    var s = String(rule);
+    if (bogus[s] || seenRule[s]) return;
+    seenRule[s] = 1;
+    kept.push(s);
   });
 
-  // 5.6d 字节跳动：境外子集走 TikTok，其余（抖音、头条及共用域名）直连。
-  // 广告规则已在前面，因此 snssdk.com 等共用域既不会漏到 MATCH，
-  // 也不会因为直连整个字节分类而放过带 @ads 标记的子域名。
-  if (built[TKT]) {
-    rules.push('GEOSITE,tiktok,' + TKT);
-    rules.push('GEOSITE,bytedance@!cn,' + TKT);
-    rules.push('GEOSITE,bytedance,DIRECT');
-  }
+  config.rules = rules.concat(kept);
 
-  // 5.6e 国内视频：广告拦截、TikTok 境外分类优先，其余平台与 CDN 直连。
-  CN_VIDEO_GEOSITES.forEach(function (site) {
-    rules.push('GEOSITE,' + site + ',DIRECT');
-  });
-
-  // 5.7 分类规则
-  GEO_MAP.forEach(function (m) {
-    if (built[m[1]]) rules.push('GEOSITE,' + m[0] + ',' + m[1]);
-  });
-
-  // 5.8 IP 段补充（域名规则漏掉的连接）
-  if (built['📲 Telegram']) rules.push('GEOIP,telegram,📲 Telegram,no-resolve');
-  // OCI 公开 IP 段，覆盖 SSH / API 等直接用 IP 发起的连接。
-  // no-resolve 是关键：域名请求不在这里解析比对，仍按上面的域名规则走，
-  // 托管在 OCI 上的站点因此不会覆盖原有的域名分流策略。
-  if (built[ORC]) rules.push('RULE-SET,my-oracle-ip,' + ORC + ',no-resolve');
-
-  // 5.9 兜底顺序：国内直连 -> 境外走主力 -> 其余进兜底组
-  rules.push('GEOSITE,cn,DIRECT');
-  rules.push('GEOIP,CN,DIRECT,no-resolve');
-  if (built['🌏 GFWlist']) rules.push('GEOSITE,geolocation-!cn,🌏 GFWlist');
-  rules.push('MATCH,' + LEAK);
-
-  config.rules = rules;
-
-  // 进程规则需要，订阅原值为 off
+  // ---- 6. 进程规则需要进程匹配；机场写的 66 条 PROCESS-NAME 在 off 下从不生效 ----
   config['find-process-mode'] = 'strict';
 
   return config;
